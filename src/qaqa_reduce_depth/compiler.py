@@ -10,6 +10,7 @@ import re
 QISKIT_REVISION = "9dedcf6f64a66344cb31364e846f71d020adcf9d"
 DEFAULT_TARGET = "qiskit_ibm_runtime.fake_provider:FakeBoston"
 DEFAULT_WEIGHTS = (0.00001, 0.00005, 0.0001, 0.00025, 0.0005, 0.001)
+DEFAULT_SABRE_TRIALS = 20
 
 
 def configure_threads():
@@ -46,7 +47,7 @@ def sabre_passes(manager):
             yield task
 
 
-def make_manager(backend, seed, weight, optimization_level=3, trials=4):
+def make_manager(backend, seed, weight, optimization_level=3, trials=DEFAULT_SABRE_TRIALS):
     from qiskit._accelerate.sabre import Heuristic, SetScaling
     from qiskit.transpiler.passes import SabreLayout, SabreSwap
     from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager

@@ -4,7 +4,7 @@ import argparse
 import math
 import sys
 
-from .compiler import DEFAULT_TARGET, DEFAULT_WEIGHTS, configure_threads
+from .compiler import DEFAULT_SABRE_TRIALS, DEFAULT_TARGET, DEFAULT_WEIGHTS, configure_threads
 
 
 def positive_int(value):
@@ -38,8 +38,9 @@ def parser():
     run.add_argument("--weights", type=nonnegative_weight, nargs="+", default=list(DEFAULT_WEIGHTS))
     run.add_argument("--target", default=DEFAULT_TARGET, help="BackendV2 module:factory (FakeBoston)")
     run.add_argument("--optimization-level", type=int, choices=range(4), default=3)
-    run.add_argument("--sabre-trials", type=positive_int, default=4,
-                     help="fixed internal layout/swap trials, independent of machine CPUs")
+    run.add_argument("--sabre-trials", type=positive_int, default=DEFAULT_SABRE_TRIALS,
+                     help="fixed internal layout/swap trials, independent of machine CPUs "
+                          "(default: %(default)s)")
     run.add_argument("--executor", choices=("local", "lsf"), default="local")
     run.add_argument("--workers", type=positive_int, default=5,
                      help="local processes; ignored for LSF (default: 5)")

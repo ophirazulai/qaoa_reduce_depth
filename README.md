@@ -78,7 +78,7 @@ Defaults:
 | Optimization level | 3 |
 | Local processes | 5 |
 | Transpilations per batch/job | 5 |
-| Internal SABRE layout and swap trials | 4 each |
+| Internal SABRE layout and swap trials | 20 each |
 | Native threads per worker | 1 |
 
 For `C` input circuits, `S` seeds, and `W` distinct weights, there are exactly
@@ -92,7 +92,7 @@ qaqa-reduce-depth run \
   --circuits ./circuits --output ./output-custom \
   --seeds 50 --seed-start 100 \
   --weights 0.00001 0.00005 0.0001 0.00025 0.0005 0.001 \
-  --workers 5 --optimization-level 3 --sabre-trials 4
+  --workers 5 --optimization-level 3 --sabre-trials 20
 ```
 
 Weights must be finite and nonnegative; duplicates are removed and values sorted.
@@ -182,7 +182,11 @@ heuristic modes; it is not an experiment holding decay enabled in both arms.
 All passes use an attempt limit of `10 × target_width`.
 
 SABRE's internal trial counts are fixed by `--sabre-trials`; they do not depend
-on available CPU cores. Each external seed is passed as `seed_transpiler`.
+on available CPU cores. The default of 20 matches the optimization-level-3 search
+budget used in `transpilation_compare`'s `subset_weight_sweep_50_seeds` experiment.
+Reducing this value searches fewer candidates to save time; increasing the number
+of external seeds does not reproduce the same internal search. Each external seed
+is passed as `seed_transpiler`.
 Native thread counts are fixed to one before Qiskit imports, preventing nested
 parallelism from multiplying the requested workers. The requested seed grid is
 separate from the internal SABRE trials.
