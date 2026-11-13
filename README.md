@@ -172,9 +172,50 @@ does not impose per-trial memory or wall-time limits.
 
 ## How the heuristic is enabled
 
-Both layout and routing are explicitly set to SABRE. The code traverses nested
-pass-manager flow controllers and configures **every `SabreLayout` and
-`SabreSwap`**, including the routing performed internally by layout.
+Using the pinned Qiskit fork installed above, run a single transpilation with
+the wait-time heuristic directly through Qiskit:
+
+```python
+from qiskit import QuantumCircuit
+from qiskit._accelerate.sabre import Heuristic, SetScaling
+from qiskit.transpiler import PassManager
+from qiskit.transpiler.passes import SabreLayout
+from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
+from qiskit_ibm_runtime.fake_provider import FakeBoston
+
+circuit = QuantumCircuit(3)
+circuit.h(0)
+circuit.cx(0, 2)
+circuit.cx(2, 1)
+
+backend = FakeBoston()
+weight = 0.0001  # Adjust the wait-time contribution here.
+heuristic = (
+    Heuristic(attempt_limit=10 * backend.num_qubits)
+    .with_basic(1.0, SetScaling.Constant)
+    .with_lookahead([0.5 / backend.num_qubits], SetScaling.Constant)
+    .with_wait_time(weight)
+)
+manager = generate_preset_pass_manager(
+    backend=backend, optimization_level=3, seed_transpiler=7,
+    routing_method="none",  # SabreLayout below also performs routing.
+)
+manager.layout = PassManager([
+    SabreLayout(backend.target, heuristic=heuristic, seed=7, max_iterations=4,
+                layout_trials=20, swap_trials=20),
+])
+transpiled = manager.run(circuit)
+print(transpiled.count_ops())
+```
+
+`SabreLayout` uses the configurable `weight` for both layout search and its
+internal routing. The remaining preset stages translate and optimize the circuit
+for the backend. The other heuristic terms match the fork's `wait_time` preset,
+which uses `0.0005` when selected by name.
+
+The project's sweep uses the same setup: one `SabreLayout` pass applies the
+heuristic to both layout search and internal routing. The preset's routing stage
+checks that the circuit is mapped; no separate `SabreSwap` pass is needed.
 
 Baseline uses the branch's decay heuristic: basic weight `1`, lookahead weight
 `0.5 / target_width`, and decay `(0.001, 5)`, with no wait-time component.
@@ -186,6 +227,8 @@ All passes use an attempt limit of `10 × target_width`.
 SABRE's internal trial counts are fixed by `--sabre-trials`; they do not depend
 on available CPU cores. The default of 20 matches the optimization-level-3 search
 budget used in `transpilation_compare`'s `subset_weight_sweep_50_seeds` experiment.
+Layout iterations follow the pinned preset: 1, 2, 2, and 4 for optimization
+levels 0, 1, 2, and 3, respectively.
 Reducing this value searches fewer candidates to save time; increasing the number
 of external seeds does not reproduce the same internal search. Each external seed
 is passed as `seed_transpiler`.
@@ -275,8 +318,8 @@ python -m pytest -q
 ruff check src tests
 ```
 
-Tests create synthetic circuits. They verify both SABRE passes, equivalence up
-to the final layout, deterministic seeds, dependency-depth measurement, QPY
+Tests create synthetic circuits. They verify SABRE layout and internal routing,
+equivalence up to the final layout, deterministic seeds, dependency-depth measurement, QPY
 round trips, exhaustive grid selection, multiple circuits per file, parallel
 local execution, and LSF execution through a fake submission executable.
 The test suite never submits real cluster jobs or reads the supplied circuit

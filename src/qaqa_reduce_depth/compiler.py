@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import inspect
 import math
 import os
 import re
@@ -11,6 +12,7 @@ QISKIT_REVISION = "9dedcf6f64a66344cb31364e846f71d020adcf9d"
 DEFAULT_TARGET = "qiskit_ibm_runtime.fake_provider:FakeBoston"
 DEFAULT_WEIGHTS = (0.00001, 0.00005, 0.0001, 0.00025, 0.0005, 0.001)
 DEFAULT_SABRE_TRIALS = 20
+SABRE_ITERATIONS_BY_LEVEL = {0: 1, 1: 2, 2: 2, 3: 4}
 
 
 def configure_threads():
@@ -33,57 +35,42 @@ def resolve_target(spec):
     return backend
 
 
-def sabre_passes(manager):
-    from qiskit.transpiler.passes import SabreLayout, SabreSwap
-
-    pending, seen = [manager.to_flow_controller()], set()
-    while pending:
-        task = pending.pop()
-        if id(task) in seen:
-            continue
-        seen.add(id(task))
-        pending.extend(getattr(task, "tasks", ()))
-        if isinstance(task, (SabreLayout, SabreSwap)):
-            yield task
-
-
 def make_manager(backend, seed, weight, optimization_level=3, trials=DEFAULT_SABRE_TRIALS):
     from qiskit._accelerate.sabre import Heuristic, SetScaling
-    from qiskit.transpiler.passes import SabreLayout, SabreSwap
+    from qiskit.transpiler import PassManager
+    from qiskit.transpiler.passes import SabreLayout
     from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 
     if not hasattr(Heuristic, "with_wait_time"):
         raise RuntimeError("Qiskit lacks wait-time support; install this project's pinned fork")
+    if "heuristic" not in inspect.signature(SabreLayout.__init__).parameters:
+        raise RuntimeError("Qiskit lacks SabreLayout.heuristic; install the pinned fork")
     if weight is not None and (
         isinstance(weight, bool) or not isinstance(weight, (int, float))
         or not math.isfinite(weight) or weight < 0
     ):
         raise ValueError("weight must be finite and nonnegative")
+    width = backend.target.num_qubits
+    heuristic = (
+        Heuristic(attempt_limit=10 * width)
+        .with_basic(1.0, SetScaling.Constant)
+        .with_lookahead([0.5 / width], SetScaling.Constant)
+    )
+    # Baseline uses decay; weighted runs use wait time without decay.
+    heuristic = (heuristic.with_decay(0.001, 5) if weight is None
+                 else heuristic.with_wait_time(weight))
     manager = generate_preset_pass_manager(
         backend=backend, seed_transpiler=seed, optimization_level=optimization_level,
-        layout_method="sabre", routing_method="sabre",
+        routing_method="none",  # SabreLayout performs routing internally.
     )
-    found = set()
-    for task in sabre_passes(manager):
-        found.add(type(task))
-        if not hasattr(task, "heuristic"):
-            raise RuntimeError("Qiskit lacks SabreLayout.heuristic; install the pinned fork")
-        width = task.target.num_qubits
-        heuristic = (
-            Heuristic(attempt_limit=10 * width)
-            .with_basic(1.0, SetScaling.Constant)
-            .with_lookahead([0.5 / width], SetScaling.Constant)
-        )
-        # Baseline reproduces the branch's standard decay preset, without any
-        # wait-time component. Weighted runs use its wait_time preset (no decay).
-        task.heuristic = (heuristic.with_decay(0.001, 5) if weight is None
-                          else heuristic.with_wait_time(weight))
-        if isinstance(task, SabreLayout):
-            task.layout_trials = task.swap_trials = trials
-        else:
-            task.trials = trials
-    if found != {SabreLayout, SabreSwap}:
-        raise RuntimeError("Expected both SABRE layout and routing in the preset manager")
+    manager.layout = PassManager([
+        SabreLayout(
+            backend.target, heuristic=heuristic, seed=seed,
+            # Preserve the pinned preset's search budget at each optimization level.
+            max_iterations=SABRE_ITERATIONS_BY_LEVEL[optimization_level],
+            layout_trials=trials, swap_trials=trials,
+        ),
+    ])
     return manager
 
 
