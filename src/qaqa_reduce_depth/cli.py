@@ -2,7 +2,9 @@
 
 import argparse
 import math
+import signal
 import sys
+import threading
 
 from .compiler import DEFAULT_SABRE_TRIALS, DEFAULT_TARGET, DEFAULT_WEIGHTS, configure_threads
 
@@ -62,12 +64,22 @@ def parser():
     return root
 
 
+def _raise_interrupt(signum, frame):
+    raise KeyboardInterrupt
+
+
 def main(argv=None):
     root = parser()
     args = root.parse_args(argv)
     configure_threads()
     from .sweep import collect, execute_shard, prepare, run_local
 
+    # A plain `kill` of the coordinator must stop its workers and record state
+    # exactly like Ctrl-C, instead of orphaning them. Handlers are main-thread only.
+    handle_terminate = (args.command == "run"
+                        and threading.current_thread() is threading.main_thread())
+    if handle_terminate:
+        previous = signal.signal(signal.SIGTERM, _raise_interrupt)
     try:
         if args.command == "worker":
             return 0 if execute_shard(args.plan, args.shard) else 1
@@ -91,12 +103,16 @@ def main(argv=None):
         print(f"{'Complete' if complete else 'INCOMPLETE'}: {plan_path.parent / 'report.md'}")
         return 0 if complete else 1
     except KeyboardInterrupt:
-        print("Interrupted. Existing results are retained; use collect after workers finish. "
-              "Accepted LSF jobs may still be running; inspect bjobs/bsub.log.", file=sys.stderr)
+        print("Interrupted. Local workers were stopped; completed batch results are retained "
+              "and collect can report them. Accepted LSF jobs may still be running; "
+              "inspect bjobs/bsub.log.", file=sys.stderr)
         return 130
     except Exception as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
+    finally:
+        if handle_terminate:
+            signal.signal(signal.SIGTERM, previous)
 
 
 if __name__ == "__main__":

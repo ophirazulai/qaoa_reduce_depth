@@ -1,7 +1,11 @@
 import json
+import os
 from pathlib import Path
+import signal
+import stat
 import subprocess
 import sys
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -278,6 +282,67 @@ def test_empty_and_malformed_inputs_rejected(tmp_path):
     assert main(arguments(source, tmp_path / "empty")) == 1
     (source / "broken.qpy").write_bytes(b"not a qpy")
     assert main(arguments(source, tmp_path / "malformed")) == 1
+
+
+def test_failed_preparation_names_the_file_and_leaves_output_reusable(inputs, tmp_path, capsys):
+    # Sorted after the valid bundle, so a snapshot already exists when it fails.
+    broken = inputs / "zz_broken.qpy"
+    broken.write_bytes(b"not a qpy")
+    created, existing = tmp_path / "created", tmp_path / "existing"
+    existing.mkdir()
+    for output in (created, existing):
+        assert main(arguments(inputs, output)) == 1
+        assert "zz_broken.qpy" in capsys.readouterr().err
+    assert not created.exists()
+    assert not any(existing.iterdir())
+    broken.unlink()
+    assert prepare(parser().parse_args(arguments(inputs, existing))).is_file()
+
+
+def test_text_outputs_are_utf8_and_follow_the_umask(tmp_path):
+    path = tmp_path / "report.md"
+    code = ("import sys; from qaqa_reduce_depth.storage import atomic_write; "
+            "atomic_write(sys.argv[1], lambda stream: stream.write('\\u2014'))")
+    # An ASCII locale, as on a compute node without UTF-8 configured.
+    environment = {**os.environ, "LC_ALL": "C", "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0"}
+    subprocess.run([sys.executable, "-c", code, str(path)], env=environment, check=True)
+    assert path.read_bytes() == "—".encode("utf-8")
+    mask = os.umask(0)
+    os.umask(mask)
+    assert stat.S_IMODE(path.stat().st_mode) == 0o666 & ~mask
+
+
+def test_terminated_local_run_stops_its_workers(inputs, tmp_path):
+    output = tmp_path / "terminated"
+    command = [sys.executable, "-m", "qaqa_reduce_depth", *arguments(
+        inputs, output, "--target", "tests.support:slow_backend",
+        "--transpilations-per-job", "1")]
+
+    def started():
+        return len(list((output / "_work" / "shards").glob("*/started")))
+
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, text=True,
+                               start_new_session=True)
+    try:
+        for line in process.stdout:
+            if line.startswith("Completed 1/12 "):
+                break
+        process.send_signal(signal.SIGTERM)
+        assert process.wait(timeout=60) == 130
+        count = started()
+        assert 0 < count < 12
+        # Neither the pool nor an orphaned worker may keep starting batches.
+        time.sleep(1.5)
+        assert started() == count
+    finally:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)  # never leak workers on failure
+        except ProcessLookupError:
+            pass
+        process.stdout.close()
+        process.wait()
+    assert main(["collect", "--output", str(output)]) == 1
+    assert "INCOMPLETE" in (output / "report.md").read_text(encoding="utf-8")
 
 
 def test_lsf_shell_quoting_and_resources(inputs, tmp_path):

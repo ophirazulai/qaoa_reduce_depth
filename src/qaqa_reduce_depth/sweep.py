@@ -10,6 +10,7 @@ import multiprocessing
 import os
 from pathlib import Path
 import shutil
+import signal
 import time
 import uuid
 from urllib.parse import quote
@@ -35,9 +36,6 @@ def discover(directory):
 
 def prepare(args):
     configure_threads()
-    from qiskit import qpy
-    from qiskit.circuit import ControlFlowOp
-
     source, output = Path(args.circuits).resolve(), Path(args.output).resolve()
     if source.is_relative_to(output) or output.is_relative_to(source):
         raise ValueError("Input and output directories must not overlap")
@@ -49,14 +47,38 @@ def prepare(args):
     backend = resolve_target(args.target)
     make_manager(backend, args.seed_start, args.weights[0], args.optimization_level,
                  args.sabre_trials)
+    created = not output.exists()
     output.mkdir(parents=True, exist_ok=True)
+    try:
+        return write_plan(args, source, output, paths, backend)
+    except BaseException:
+        # A failed preparation is not a run. Remove what it created (the
+        # directory was verified empty above) so the same --output can be
+        # reused once the input problem is fixed.
+        shutil.rmtree(output / "_work", ignore_errors=True)
+        (output / "plan.json").unlink(missing_ok=True)
+        if created:
+            try:
+                output.rmdir()
+            except OSError:
+                pass
+        raise
+
+
+def write_plan(args, source, output, paths, backend):
+    from qiskit import qpy
+    from qiskit.circuit import ControlFlowOp
+
     inputs = []
     for file_index, path in enumerate(paths):
         snapshot = output / "_work" / "inputs" / f"{file_index:06d}.qpy"
         snapshot.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(path, snapshot)
-        with snapshot.open("rb") as stream:
-            circuits = qpy.load(stream)
+        try:
+            with snapshot.open("rb") as stream:
+                circuits = qpy.load(stream)
+        except Exception as exc:
+            raise ValueError(f"Cannot read QPY file {path}: {exc}") from exc
         if not circuits:
             raise ValueError(f"QPY file contains no circuits: {path}")
         digest = sha256(snapshot)
@@ -154,11 +176,19 @@ def execute_shard(plan_path, shard_index):
     return all(row["status"] == "ok" for row in rows)
 
 
+def _ignore_interrupt():
+    # Ctrl-C signals the whole foreground process group. Only the coordinator
+    # reacts to it, and then stops the workers itself.
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+
 def run_local(plan_path, workers):
     plan = read_json(plan_path)
     failures = []
-    with ProcessPoolExecutor(max_workers=workers,
-                             mp_context=multiprocessing.get_context("spawn")) as pool:
+    unrelated = set(multiprocessing.active_children())
+    pool = ProcessPoolExecutor(max_workers=workers, initializer=_ignore_interrupt,
+                               mp_context=multiprocessing.get_context("spawn"))
+    try:
         futures = {pool.submit(execute_shard, str(plan_path), index): index
                    for index in range(len(plan["shards"]))}
         for count, future in enumerate(as_completed(futures), 1):
@@ -169,6 +199,14 @@ def run_local(plan_path, workers):
             except Exception as exc:
                 failures.append(f"shard {index}: {type(exc).__name__}: {exc}")
             print(f"Completed {count}/{len(futures)} batches", flush=True)
+    except BaseException:
+        # Interrupted: a pool left to shut down normally would silently run
+        # every remaining batch before this process could exit.
+        for process in set(multiprocessing.active_children()) - unrelated:
+            process.terminate()
+        raise
+    finally:
+        pool.shutdown(cancel_futures=True)
     write_json(plan_path.parent / "execution.json", {"executor": "local", "errors": failures})
 
 

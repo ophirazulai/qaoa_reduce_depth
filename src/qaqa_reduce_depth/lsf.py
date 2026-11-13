@@ -20,11 +20,13 @@ def job_script(plan_path, index, python=None):
     return "#!/bin/sh\nset -eu\nexec " + shlex.join(command) + "\n"
 
 
-def submission_command(plan_path, index, config):
+def submission_command(plan_path, index, config, run_id=None):
     directory = shard_directory(Path(plan_path).parent, index)
     units = {"KB": 1024 * 1024, "MB": 1024, "GB": 1}
     memory = config["lsf_memory_gb"] * units[config["lsf_memory_unit"]]
-    name = f"qaqa-{read_json(plan_path)['run_id'][:10]}-{index}"
+    # Callers submitting many jobs pass run_id: the plan grows with the number
+    # of jobs, so re-reading it for each one is quadratic.
+    name = f"qaqa-{(run_id or read_json(plan_path)['run_id'])[:10]}-{index}"
     command = [
         config["bsub"], "-K", "-J", name, "-n", "1", "-W", str(config["lsf_wall_minutes"]),
         "-M", str(memory), "-R", f"rusage[mem={memory}] span[hosts=1]",
@@ -57,7 +59,7 @@ def run_lsf(plan_path):
                 directory.mkdir(parents=True, exist_ok=True)
                 script = directory / "job.sh"
                 script.write_text(job_script(plan_path, index))
-                command = submission_command(plan_path, index, config)
+                command = submission_command(plan_path, index, config, plan["run_id"])
                 metadata = {"command": command, "shard_index": index, "status": "submitting"}
                 write_json(directory / "submission.json", metadata)
                 try:

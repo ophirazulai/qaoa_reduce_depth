@@ -57,6 +57,8 @@ Workers read those snapshots, so subsequent edits to the originals do not alter
 the sweep. Empty/malformed QPY files, circuits wider than the target, and dynamic
 control flow fail preparation. Static circuits may include measurements,
 barriers, and unbound parameters; unbound parameters remain symbolic.
+A failed preparation names the offending file and removes what it created, so
+the same output directory can be reused after fixing the input.
 
 ## Run locally
 
@@ -252,6 +254,10 @@ inputs can still have winners. Exit status is `0` for a complete sweep, `1` for
 failure/incomplete results, `2` for CLI argument errors, and `130` on interruption.
 Inspect `report.md`, `results.json`, and LSF logs for details. Use a new output
 directory to rerun a failed search.
+
+Ctrl-C or `kill` (SIGINT or SIGTERM) on the coordinator stops a local sweep's
+workers immediately. Batches that already finished are kept, and `collect`
+reports the remaining ones as missing. For LSF, see the note on accepted jobs above.
 
 Regenerate reports without transpilation:
 
