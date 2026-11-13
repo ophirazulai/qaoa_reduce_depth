@@ -218,15 +218,24 @@ def collect(output):
             item["status"] = "incomplete"
         else:
             best = min(choices, key=rank)
+            case_rows = [row for row in rows if row["case_id"] == case_id]
             # Guard against a malformed result that omitted the actual minimum.
-            all_best = min((row for row in rows if row["case_id"] == case_id), key=rank)
+            all_best = min(case_rows, key=rank)
             if best["task_id"] != all_best["task_id"]:
                 raise ValueError(f"Shard winners omit the minimum for {case_id}")
+            # A shard retains only its overall winner's artifact, so compare
+            # the two heuristic modes using all trial measurements.
+            baseline = min((row for row in case_rows if row["weight"] is None), key=rank)
+            wait_time = min((row for row in case_rows if row["weight"] is not None), key=rank)
             destination = output / "best" / f"{case_id}.qpy"
             atomic_write(destination, lambda stream: stream.write(
                 (output / best["artifact"]).read_bytes()), binary=True)
             item.update(status="complete", seed=best["seed"], weight=best["weight"],
                         d2=best["d2"], n2=best["n2"],
+                        best_baseline_d2=baseline["d2"], best_wait_time_d2=wait_time["d2"],
+                        best_baseline_n2=baseline["n2"], best_wait_time_n2=wait_time["n2"],
+                        d2_ratio=wait_time["d2"] / baseline["d2"] if baseline["d2"] else None,
+                        n2_ratio=wait_time["n2"] / baseline["n2"] if baseline["n2"] else None,
                         output=destination.relative_to(output).as_posix())
         selected.append(item)
     errors = [row for row in rows if row["status"] != "ok"]
@@ -243,18 +252,33 @@ def collect(output):
         f"Weights: {', '.join(format(w, '.8g') for w in config['weights'])}; plus baseline.",
         "Baseline: decay heuristic, wait time disabled. Weighted: wait-time heuristic, no decay.",
         "D2: longest dependency path counting two-qubit gates. N2: total two-qubit gates.",
+        "D2 ratio = best wait-time D2 / best baseline D2 across all requested trials per input. "
+        "N2 ratio = wait-time N2 / baseline N2 for those same best trials, "
+        "selected by D2 and then N2. Below 1 favors wait time; above 1 favors baseline; "
+        "1 means equal values.",
+        "Weight 0 belongs to the wait-time group. A ratio is N/A when its baseline value is zero; "
+        "comparisons are omitted for incomplete inputs.",
         "Tie order: D2, N2, baseline, smaller weight, smaller seed.",
         "Minimum means the best of the requested trials, not a global optimum.", "",
-        "| Input file | Circuit index | Status | Seed | Weight | D2 | N2 | Trials | QPY |",
-        "| --- | ---: | --- | ---: | --- | ---: | ---: | ---: | --- |",
+        "| Input file | Circuit index | Status | Seed | Weight | D2 | N2 | Best baseline D2 | "
+        "Best wait-time D2 | D2 ratio (wait/baseline) | Best baseline N2 | Best wait-time N2 | "
+        "N2 ratio (wait/baseline) | Trials | QPY |",
+        "| --- | ---: | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | "
+        "---: | ---: | ---: | ---: | --- |",
     ]
     for row in selected:
         ready = row["status"] == "complete"
         weight = ("baseline" if row.get("weight") is None else format(row["weight"], ".8g"))
         artifact = f"[QPY]({quote(row['output'])})" if ready else "—"
+        d2_ratio = n2_ratio = "—"
+        if ready:
+            d2_ratio = "N/A" if row["d2_ratio"] is None else format(row["d2_ratio"], ".6g")
+            n2_ratio = "N/A" if row["n2_ratio"] is None else format(row["n2_ratio"], ".6g")
         lines.append("| " + " | ".join(map(_cell, [
             row["source"], row["circuit_index"], row["status"], row.get("seed", "—"),
             weight if ready else "—", row.get("d2", "—"), row.get("n2", "—"),
+            row.get("best_baseline_d2", "—"), row.get("best_wait_time_d2", "—"), d2_ratio,
+            row.get("best_baseline_n2", "—"), row.get("best_wait_time_n2", "—"), n2_ratio,
             f"{row['successful_trials']}/{row['expected_trials']}", artifact,
         ])) + " |")
     if issues or errors:

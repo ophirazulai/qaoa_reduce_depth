@@ -72,7 +72,7 @@ Defaults:
 | Input directory | `./circuits` |
 | Output directory | `./output` |
 | Target | `qiskit_ibm_runtime.fake_provider:FakeBoston` |
-| Seed count | 30, seeds `0..29` |
+| Seed count | 150, seeds `0..149` |
 | Weights | `0.00001 0.00005 0.0001 0.00025 0.0005 0.001` |
 | Baseline | Always included, once per seed |
 | Optimization level | 3 |
@@ -82,7 +82,7 @@ Defaults:
 | Native threads per worker | 1 |
 
 For `C` input circuits, `S` seeds, and `W` distinct weights, there are exactly
-`C × S × (W + 1)` trials. Defaults give **210 trials per input circuit**. Each
+`C × S × (W + 1)` trials. Defaults give **1,050 trials per input circuit**. Each
 trial always starts from the original input, not a previously transpiled output.
 
 Customize the search:
@@ -139,7 +139,7 @@ The number of submitted jobs is `ceil(total trials / transpilations-per-job)`.
 Each job requests one CPU and runs at most `--transpilations-per-job` trials
 sequentially. One trial is one input circuit, one seed, and one baseline/weight
 setting. The last job may be smaller. With the default grid and batch size,
-there are **42 jobs per input circuit**. All jobs are submitted without a
+there are **210 jobs per input circuit**. All jobs are submitted without a
 concurrency cap; LSF controls when they run. `--workers` applies only to local
 execution, which uses the same batches and winner selection.
 
@@ -203,9 +203,20 @@ then baseline over a weight, then the smaller weight and seed. This provides
 deterministic tie handling independent of completion order. The result is the
 minimum among the requested trials, not a claim of a globally optimal circuit.
 
+For each complete input, the report also compares the best wait-time D2 across
+all requested seeds and weights with the best baseline D2 across all requested
+seeds. Weight `0`, if requested, belongs to the wait-time group. The **D2 ratio**
+is `best wait-time D2 / best baseline D2`: below `1` means wait time improves
+depth, `1` means equal depth, and above `1` means worse depth. The **N2 ratio**
+is `wait-time N2 / baseline N2` for those same best trials, selected by D2 and
+then N2. Below `1` means fewer two-qubit gates with wait time. Both groups' D2
+and N2 values and both ratios are included in the report and `results.json`.
+Incomplete inputs have no comparison. A zero baseline value makes its ratio
+undefined, shown as `N/A` in the report and `null` in `results.json`.
+
 ```text
 output/
-  report.md             human-readable winners, seeds, weights, D2, and N2
+  report.md             winners, seeds, weights, D2, N2, and baseline D2/N2 ratios
   results.json          structured per-input selection and failures
   trials.json           every completed trial's metrics, timing, or error
   plan.json             search grid, versions, input identities and checksums

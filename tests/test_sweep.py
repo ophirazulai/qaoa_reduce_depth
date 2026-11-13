@@ -12,7 +12,7 @@ from qaqa_reduce_depth import lsf
 from qaqa_reduce_depth.cli import main, parser
 from qaqa_reduce_depth.compiler import DEFAULT_WEIGHTS, measure, rank
 from qaqa_reduce_depth.lsf import job_script, submission_command
-from qaqa_reduce_depth.storage import read_json, write_json
+from qaqa_reduce_depth.storage import read_json, sha256, write_json
 from qaqa_reduce_depth.sweep import collect, execute_shard, prepare, shard_directory
 
 
@@ -30,8 +30,19 @@ def assert_result(output):
     assert len(trials) == 12
     assert len(summary["inputs"]) == 2
     for selected in summary["inputs"]:
-        candidate = min((row for row in trials if row["case_id"] == selected["case_id"]), key=rank)
+        case_trials = [row for row in trials if row["case_id"] == selected["case_id"]]
+        candidate = min(case_trials, key=rank)
         assert all(selected[key] == candidate[key] for key in ("seed", "weight", "d2", "n2"))
+        baseline = min((row for row in case_trials if row["weight"] is None), key=rank)
+        wait_time = min((row for row in case_trials if row["weight"] is not None), key=rank)
+        for metric in ("d2", "n2"):
+            assert selected[f"best_baseline_{metric}"] == baseline[metric]
+            assert selected[f"best_wait_time_{metric}"] == wait_time[metric]
+            if baseline[metric]:
+                assert selected[f"{metric}_ratio"] == pytest.approx(
+                    wait_time[metric] / baseline[metric])
+            else:
+                assert selected[f"{metric}_ratio"] is None
         with (output / selected["output"]).open("rb") as stream:
             compiled, = qpy.load(stream)
         assert measure(compiled) == {key: selected[key] for key in ("d2", "n2")}
@@ -134,6 +145,73 @@ def test_missing_or_failed_trials_never_publish_a_minimum(inputs, tmp_path):
     result = read_json(shard_directory(output, 1) / "result.json")
     assert all("checksum" in row["error"] for row in result["rows"])
     assert not collect(output)
+    for selected in read_json(output / "results.json")["inputs"]:
+        assert selected["status"] == "incomplete"
+        for metric in ("d2", "n2"):
+            assert not {f"best_baseline_{metric}", f"best_wait_time_{metric}",
+                        f"{metric}_ratio"}.intersection(selected)
+    table = [line.split("|")[1:-1] for line in (output / "report.md").read_text().splitlines()
+             if line.startswith("|")]
+    for cells in table[2:]:
+        row = dict(zip(map(str.strip, table[0]), map(str.strip, cells)))
+        for metric in ("D2", "N2"):
+            for column in (f"Best baseline {metric}", f"Best wait-time {metric}",
+                           f"{metric} ratio (wait/baseline)"):
+                assert row[column] == "—"
+
+
+@pytest.mark.parametrize(("baseline_d2", "wait_time_d2", "d2_ratio",
+                          "baseline_n2", "wait_time_n2", "n2_ratio"), [
+    (10, 6, 0.6, 40, 30, 0.75), (6, 9, 1.5, 30, 60, 2.0), (7, 7, 1.0, 25, 25, 1.0),
+    (0, 0, None, 0, 0, None), (0, 3, None, 0, 8, None),
+])
+def test_report_compares_group_minima_from_all_trials(
+        tmp_path, baseline_d2, wait_time_d2, d2_ratio, baseline_n2, wait_time_n2, n2_ratio):
+    case = {"case_id": "circuit", "source": "input.qpy", "circuit_index": 0}
+    tasks = [{"task_id": index, "case_id": case["case_id"], "seed": seed, "weight": weight}
+             for index, (seed, weight) in enumerate(
+                 (seed, weight) for seed in range(2) for weight in (None, 0.0, 0.1))]
+    # The group minima use different seeds after resolving D2 ties with N2.
+    # Weight zero is a wait-time trial. Worse-depth trials can have lower N2.
+    depths = [baseline_d2, wait_time_d2, wait_time_d2 + 2,
+              baseline_d2, wait_time_d2, wait_time_d2 + 1]
+    counts = [baseline_n2 + 5, wait_time_n2, wait_time_d2 + 2,
+              baseline_n2, wait_time_n2 + 4, wait_time_d2 + 1]
+    rows = [{**task, "status": "ok", "d2": depth, "n2": count}
+            for task, depth, count in zip(tasks, depths, counts)]
+    write_json(tmp_path / "plan.json", {
+        "run_id": "comparison", "inputs": [case], "shards": [tasks],
+        "config": {"target": "test", "optimization_level": 3, "seed_start": 0,
+                   "seeds": 2, "weights": [0.0, 0.1]},
+    })
+    directory = shard_directory(tmp_path, 0)
+    directory.mkdir(parents=True)
+    artifact = directory / "winner.qpy"
+    artifact.write_bytes(b"saved candidate")
+    # Only the overall winner has an artifact, as with real shard results.
+    winner = min(rows, key=rank)
+    write_json(directory / "result.json", {
+        "run_id": "comparison", "shard_index": 0, "rows": rows,
+        "winners": [{**winner, "artifact": artifact.relative_to(tmp_path).as_posix(),
+                     "artifact_sha256": sha256(artifact)}],
+    })
+
+    assert collect(tmp_path)
+    selected, = read_json(tmp_path / "results.json")["inputs"]
+    assert selected["d2"] == winner["d2"]
+    table = [line.split("|")[1:-1] for line in (tmp_path / "report.md").read_text().splitlines()
+             if line.startswith("|")]
+    report_row = dict(zip(map(str.strip, table[0]), map(str.strip, table[2])))
+    for metric, baseline, wait_time, ratio in (
+            ("d2", baseline_d2, wait_time_d2, d2_ratio),
+            ("n2", baseline_n2, wait_time_n2, n2_ratio)):
+        assert selected[f"best_baseline_{metric}"] == baseline
+        assert selected[f"best_wait_time_{metric}"] == wait_time
+        assert selected[f"{metric}_ratio"] == (pytest.approx(ratio) if ratio is not None else None)
+        assert report_row[f"Best baseline {metric.upper()}"] == str(baseline)
+        assert report_row[f"Best wait-time {metric.upper()}"] == str(wait_time)
+        assert report_row[f"{metric.upper()} ratio (wait/baseline)"] == (
+            format(ratio, ".6g") if ratio is not None else "N/A")
 
 
 def test_duplicate_worker_and_altered_result_rejected(inputs, tmp_path):
@@ -152,7 +230,7 @@ def test_duplicate_worker_and_altered_result_rejected(inputs, tmp_path):
 
 def test_defaults_and_validation(inputs, tmp_path):
     defaults = parser().parse_args(["run"])
-    assert defaults.seeds == 30
+    assert defaults.seeds == 150
     assert defaults.workers == defaults.transpilations_per_job == 5
     assert defaults.weights == list(DEFAULT_WEIGHTS)
     for extra in (["--seeds", "0"], ["--weights", "nan"], ["--weights", "inf"],
