@@ -33,7 +33,8 @@ def parser():
     run = commands.add_parser("run", help="run a complete local or LSF sweep")
     run.add_argument("--circuits", default="circuits", help="input QPY directory (recursive)")
     run.add_argument("--output", default="output", help="new or empty output directory")
-    run.add_argument("--seeds", type=positive_int, default=150, help="number of seeds (default: 150)")
+    run.add_argument("--seeds", type=positive_int, default=30,
+                     help="number of seeds (default: %(default)s)")
     run.add_argument("--seed-start", type=int, default=0)
     run.add_argument("--weights", type=nonnegative_weight, nargs="+", default=list(DEFAULT_WEIGHTS))
     run.add_argument("--target", default=DEFAULT_TARGET, help="BackendV2 module:factory (FakeBoston)")

@@ -230,7 +230,7 @@ def test_duplicate_worker_and_altered_result_rejected(inputs, tmp_path):
 
 def test_defaults_and_validation(inputs, tmp_path):
     defaults = parser().parse_args(["run"])
-    assert defaults.seeds == 150
+    assert defaults.seeds == 30
     assert defaults.workers == defaults.transpilations_per_job == 5
     assert defaults.weights == list(DEFAULT_WEIGHTS)
     for extra in (["--seeds", "0"], ["--weights", "nan"], ["--weights", "inf"],

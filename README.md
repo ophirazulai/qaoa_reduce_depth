@@ -72,7 +72,7 @@ Defaults:
 | Input directory | `./circuits` |
 | Output directory | `./output` |
 | Target | `qiskit_ibm_runtime.fake_provider:FakeBoston` |
-| Seed count | 150, seeds `0..149` |
+| Seed count | 30, seeds `0..29` |
 | Weights | `0.00001 0.00005 0.0001 0.00025 0.0005 0.001` |
 | Baseline | Always included, once per seed |
 | Optimization level | 3 |
@@ -82,7 +82,7 @@ Defaults:
 | Native threads per worker | 1 |
 
 For `C` input circuits, `S` seeds, and `W` distinct weights, there are exactly
-`C × S × (W + 1)` trials. Defaults give **1,050 trials per input circuit**. Each
+`C × S × (W + 1)` trials. Defaults give **210 trials per input circuit**. Each
 trial always starts from the original input, not a previously transpiled output.
 
 Customize the search:
@@ -139,7 +139,7 @@ The number of submitted jobs is `ceil(total trials / transpilations-per-job)`.
 Each job requests one CPU and runs at most `--transpilations-per-job` trials
 sequentially. One trial is one input circuit, one seed, and one baseline/weight
 setting. The last job may be smaller. With the default grid and batch size,
-there are **210 jobs per input circuit**. All jobs are submitted without a
+there are **42 jobs per input circuit**. All jobs are submitted without a
 concurrency cap; LSF controls when they run. `--workers` applies only to local
 execution, which uses the same batches and winner selection.
 
