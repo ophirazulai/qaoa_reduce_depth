@@ -226,12 +226,18 @@ output/
   plan.json             search grid, versions, input identities and checksums
   execution.json        execution/submission failures
   best/
-    f000000-c0000.qpy    selected circuit; IDs map to file/index in report
+    e20-c20-z3__base__p1.qpy  selected circuit, named after its input
   _work/
     inputs/             immutable input snapshots
     shards/000000/      batch results and best candidate per input in that batch
                         plus job.sh, submission.json, and logs in LSF mode
 ```
+
+Files in `best/` preserve their input filenames and relative subdirectories.
+For multi-circuit inputs, an index is added: `bundle.qpy` produces
+`bundle__circuit_0.qpy`, `bundle__circuit_1.qpy`, and so on. An additional numeric
+suffix is added if an indexed name conflicts with an input file or directory.
+The report and `results.json` link to the exact output paths.
 
 Each selected QPY file contains one circuit, including its physical layout.
 QPY candidates are saved as the trials run, so collection copies the winning

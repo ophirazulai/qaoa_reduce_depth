@@ -30,6 +30,7 @@ def assert_result(output):
     assert len(trials) == 12
     assert len(summary["inputs"]) == 2
     for selected in summary["inputs"]:
+        assert selected["output"] == f"best/bundle__circuit_{selected['circuit_index']}.qpy"
         case_trials = [row for row in trials if row["case_id"] == selected["case_id"]]
         candidate = min(case_trials, key=rank)
         assert all(selected[key] == candidate[key] for key in ("seed", "weight", "d2", "n2"))
@@ -61,6 +62,35 @@ def test_local_parallel_end_to_end(inputs, tmp_path):
     assert [len(shard) for shard in plan["shards"]] == [5, 5, 2]
     assert main(["collect", "--output", str(output)]) == 0
     assert main(arguments(inputs, output)) == 1
+
+
+def test_output_names_preserve_sources_and_avoid_bundle_collisions(inputs, tmp_path):
+    with (inputs / "bundle.qpy").open("rb") as stream:
+        circuit = qpy.load(stream)[0]
+    names = ["single.qpy", "nested/single.qpy", "bundle__circuit_0.qpy",
+             "bundle__circuit_0__1.qpy", "bundle__circuit_1.qpy/inside.qpy"]
+    for name in names:
+        path = inputs / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("wb") as stream:
+            qpy.dump(circuit, stream)
+    output = tmp_path / "named"
+    assert main(arguments(inputs, output, "--seeds", "1", "--weights", "0")) == 0
+    summary = read_json(output / "results.json")
+    expected = {(name, 0): f"best/{name}" for name in names}
+    expected.update({("bundle.qpy", 0): "best/bundle__circuit_0__2.qpy",
+                     ("bundle.qpy", 1): "best/bundle__circuit_1__1.qpy"})
+    actual = {(row["source"], row["circuit_index"]): row["output"]
+              for row in summary["inputs"]}
+    assert actual == expected
+    report = (output / "report.md").read_text()
+    for row in summary["inputs"]:
+        with (output / row["output"]).open("rb") as stream:
+            compiled, = qpy.load(stream)
+        assert measure(compiled) == {key: row[key] for key in ("d2", "n2")}
+        assert f"[QPY]({row['output']})" in report
+    assert collect(output)
+    assert read_json(output / "results.json") == summary
 
 
 def test_lsf_parallel_end_to_end_matches_local(inputs, tmp_path):

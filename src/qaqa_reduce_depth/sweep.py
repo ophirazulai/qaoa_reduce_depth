@@ -176,6 +176,28 @@ def _cell(value):
     return str(value).replace("|", "\\|").replace("\n", " ").replace("\r", " ")
 
 
+def best_output_paths(inputs):
+    """Keep source names, adding collision-free indices for QPY bundles."""
+    counts = Counter(case["source"] for case in inputs)
+    # Reserve files and directories, including case variants on macOS/Windows.
+    reserved = {path.as_posix().casefold() for name in counts
+                for path in (Path(name), *Path(name).parents)}
+    paths = {}
+    for case in inputs:
+        source = Path(case["source"])
+        destination = source
+        if counts[case["source"]] > 1:
+            stem = f"{source.stem}__circuit_{case['circuit_index']}"
+            destination = source.with_name(f"{stem}{source.suffix}")
+            suffix = 1
+            while destination.as_posix().casefold() in reserved:
+                destination = source.with_name(f"{stem}__{suffix}{source.suffix}")
+                suffix += 1
+            reserved.add(destination.as_posix().casefold())
+        paths[case["case_id"]] = Path("best") / destination
+    return paths
+
+
 def collect(output):
     """Only publish a minimum when every planned trial for that input succeeded."""
     output = Path(output).resolve()
@@ -208,6 +230,7 @@ def collect(output):
         rows.extend(result["rows"])
         candidates.extend(result["winners"])
     complete, selected = True, []
+    output_paths = best_output_paths(plan["inputs"])
     success = Counter(row["case_id"] for row in rows if row["status"] == "ok")
     for case in plan["inputs"]:
         case_id = case["case_id"]
@@ -227,7 +250,7 @@ def collect(output):
             # the two heuristic modes using all trial measurements.
             baseline = min((row for row in case_rows if row["weight"] is None), key=rank)
             wait_time = min((row for row in case_rows if row["weight"] is not None), key=rank)
-            destination = output / "best" / f"{case_id}.qpy"
+            destination = output / output_paths[case_id]
             atomic_write(destination, lambda stream: stream.write(
                 (output / best["artifact"]).read_bytes()), binary=True)
             item.update(status="complete", seed=best["seed"], weight=best["weight"],
