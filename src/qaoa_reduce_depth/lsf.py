@@ -15,7 +15,7 @@ from .sweep import shard_directory
 
 
 def job_script(plan_path, index, python=None):
-    command = [python or sys.executable, "-m", "qaqa_reduce_depth", "worker",
+    command = [python or sys.executable, "-m", "qaoa_reduce_depth", "worker",
                "--plan", str(Path(plan_path).resolve()), "--shard", str(index)]
     return "#!/bin/sh\nset -eu\nexec " + shlex.join(command) + "\n"
 
@@ -26,7 +26,7 @@ def submission_command(plan_path, index, config, run_id=None):
     memory = config["lsf_memory_gb"] * units[config["lsf_memory_unit"]]
     # Callers submitting many jobs pass run_id: the plan grows with the number
     # of jobs, so re-reading it for each one is quadratic.
-    name = f"qaqa-{(run_id or read_json(plan_path)['run_id'])[:10]}-{index}"
+    name = f"qaoa-{(run_id or read_json(plan_path)['run_id'])[:10]}-{index}"
     command = [
         config["bsub"], "-K", "-J", name, "-n", "1", "-W", str(config["lsf_wall_minutes"]),
         "-M", str(memory), "-R", f"rusage[mem={memory}] span[hosts=1]",

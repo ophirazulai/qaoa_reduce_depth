@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src"))
 
-from qaqa_reduce_depth.compiler import configure_threads  # noqa: E402
+from qaoa_reduce_depth.compiler import configure_threads  # noqa: E402
 
 configure_threads()
 

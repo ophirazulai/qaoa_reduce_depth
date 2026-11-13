@@ -12,12 +12,12 @@ import pytest
 from qiskit import qpy
 from qiskit.quantum_info import Operator
 
-from qaqa_reduce_depth import lsf
-from qaqa_reduce_depth.cli import main, parser
-from qaqa_reduce_depth.compiler import DEFAULT_WEIGHTS, measure, rank
-from qaqa_reduce_depth.lsf import job_script, submission_command
-from qaqa_reduce_depth.storage import read_json, sha256, write_json
-from qaqa_reduce_depth.sweep import collect, execute_shard, prepare, shard_directory
+from qaoa_reduce_depth import lsf
+from qaoa_reduce_depth.cli import main, parser
+from qaoa_reduce_depth.compiler import DEFAULT_WEIGHTS, measure, rank
+from qaoa_reduce_depth.lsf import job_script, submission_command
+from qaoa_reduce_depth.storage import read_json, sha256, write_json
+from qaoa_reduce_depth.sweep import collect, execute_shard, prepare, shard_directory
 
 
 def arguments(inputs, output, *extra):
@@ -301,7 +301,7 @@ def test_failed_preparation_names_the_file_and_leaves_output_reusable(inputs, tm
 
 def test_text_outputs_are_utf8_and_follow_the_umask(tmp_path):
     path = tmp_path / "report.md"
-    code = ("import sys; from qaqa_reduce_depth.storage import atomic_write; "
+    code = ("import sys; from qaoa_reduce_depth.storage import atomic_write; "
             "atomic_write(sys.argv[1], lambda stream: stream.write('\\u2014'))")
     # An ASCII locale, as on a compute node without UTF-8 configured.
     environment = {**os.environ, "LC_ALL": "C", "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0"}
@@ -314,7 +314,7 @@ def test_text_outputs_are_utf8_and_follow_the_umask(tmp_path):
 
 def test_terminated_local_run_stops_its_workers(inputs, tmp_path):
     output = tmp_path / "terminated"
-    command = [sys.executable, "-m", "qaqa_reduce_depth", *arguments(
+    command = [sys.executable, "-m", "qaoa_reduce_depth", *arguments(
         inputs, output, "--target", "tests.support:slow_backend",
         "--transpilations-per-job", "1")]
 

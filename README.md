@@ -1,4 +1,4 @@
-# QAQA reduce depth
+# QAOA reduce depth
 
 Try different random seeds and SABRE wait-time weights to find a transpilation
 with lower two-qubit depth. Each circuit is also run with a baseline that has
@@ -26,7 +26,7 @@ Put your `.qpy` files in `circuits/`, then run:
 
 ```bash
 source .venv/bin/activate
-qaqa-reduce-depth run
+qaoa-reduce-depth run
 ```
 
 The default run uses FakeBoston, 30 seeds, six wait-time weights plus baseline,

@@ -4,7 +4,7 @@ from qiskit.circuit import Parameter
 from qiskit.quantum_info import Operator
 from qiskit.transpiler.passes import CheckMap, SabreLayout, SabreSwap
 
-from qaqa_reduce_depth.compiler import make_manager, measure, rank, resolve_target
+from qaoa_reduce_depth.compiler import make_manager, measure, rank, resolve_target
 from tests.support import backend
 
 
